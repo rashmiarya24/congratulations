@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Congratulations on Your New Job 🎉</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: 'Poppins', sans-serif;
+    }
+
+    body {
+        height: 100vh;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        text-align: center;
+    }
+
+    .card {
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 40px 30px;
+        max-width: 420px;
+        width: 90%;
+        animation: popIn 1s ease;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    @keyframes popIn {
+        0% { transform: scale(0.5); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
+    }
+
+    h1 {
+        font-size: 2.2rem;
+        margin-bottom: 15px;
+        animation: glow 2s infinite alternate;
+    }
+
+    @keyframes glow {
+        from { text-shadow: 0 0 10px #fff; }
+        to { text-shadow: 0 0 20px #ffeb3b; }
+    }
+
+    .typing {
+        font-size: 1.1rem;
+        min-height: 80px;
+        margin-bottom: 25px;
+    }
+
+    button {
+        padding: 12px 25px;
+        border: none;
+        border-radius: 30px;
+        font-size: 1rem;
+        cursor: pointer;
+        background: #ffeb3b;
+        color: #333;
+        font-weight: bold;
+        transition: 0.3s;
+    }
+
+    button:hover {
+        transform: scale(1.1);
+        background: #fff176;
+    }
+
+    .hidden-message {
+        margin-top: 20px;
+        font-size: 1.05rem;
+        display: none;
+        animation: fadeIn 1s ease forwards;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Balloons */
+    .balloon {
+        position: absolute;
+        bottom: -150px;
+        font-size: 2.5rem;
+        animation: floatUp 8s linear infinite;
+    }
+
+    @keyframes floatUp {
+        0% { transform: translateY(0); opacity: 1; }
+        100% { transform: translateY(-120vh); opacity: 0; }
+    }
+
+    /* Confetti */
+    .confetti {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: red;
+        animation: fall 4s linear infinite;
+    }
+
+    @keyframes fall {
+        0% { transform: translateY(-10px) rotate(0deg); }
+        100% { transform: translateY(110vh) rotate(360deg); }
+    }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+    <h1>🎉 Congratulations! 🎉</h1>
+    <div class="typing" id="typing"></div>
+
+    <button onclick="celebrate()">Celebrate 🎊</button>
+
+    <div class="hidden-message" id="secret">
+        💼✨ New job, new journey! <br>
+        I’m so proud of you. <br>
+        Go shine and conquer the world 🌍💖
+    </div>
+</div>
+
+<script>
+    // Typing animation
+    const text = "Congratulations on your new job! 💼🎉\nAll the best for this exciting journey.\nI know you can do it — believe in yourself! ✨";
+    let i = 0;
+    const speed = 50;
+    const typingDiv = document.getElementById("typing");
+
+    function typeWriter() {
+        if (i < text.length) {
+            typingDiv.innerHTML += text.charAt(i) === "\n" ? "<br>" : text.charAt(i);
+            i++;
+            setTimeout(typeWriter, speed);
+        }
+    }
+    typeWriter();
+
+    // Celebrate button
+    function celebrate() {
+        document.getElementById("secret").style.display = "block";
+        createConfetti();
+        createBalloons();
+    }
+
+    function createConfetti() {
+        for (let i = 0; i < 30; i++) {
+            const confetti = document.createElement("div");
+            confetti.className = "confetti";
+            confetti.style.left = Math.random() * 100 + "vw";
+            confetti.style.background = `hsl(${Math.random()*360}, 100%, 50%)`;
+            confetti.style.animationDuration = (Math.random() * 3 + 2) + "s";
+            document.body.appendChild(confetti);
+
+            setTimeout(() => confetti.remove(), 4000);
+        }
+    }
+
+    function createBalloons() {
+        const emojis = ["🎈", "🎉", "💼", "✨"];
+        for (let i = 0; i < 6; i++) {
+            const balloon = document.createElement("div");
+            balloon.className = "balloon";
+            balloon.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+            balloon.style.left = Math.random() * 100 + "vw";
+            balloon.style.animationDuration = (Math.random() * 4 + 6) + "s";
+            document.body.appendChild(balloon);
+
+            setTimeout(() => balloon.remove(), 8000);
+        }
+    }
+</script>
+
+</body>
+</html>

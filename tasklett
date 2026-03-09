@@ -1,0 +1,284 @@
+Below is a clean Spring Batch implementation for your case:
+
+✔ Multiple CSV files in S3
+✔ Batch runs hourly
+✔ Tasklet → get file list
+✔ Chunk step → read CSV and insert into DB
+✔ Tasklet → mark/move processed file
+
+This is a typical enterprise batch pipeline.
+
+⸻
+
+1️⃣ Job Configuration
+
+@Configuration
+@EnableBatchProcessing
+public class BatchConfig {
+
+    @Autowired
+    private JobBuilderFactory jobBuilderFactory;
+
+    @Autowired
+    private StepBuilderFactory stepBuilderFactory;
+
+    @Bean
+    public Job csvImportJob(Step listFilesStep,
+                            Step processFileStep,
+                            Step moveFileStep) {
+
+        return jobBuilderFactory.get("csvImportJob")
+                .start(listFilesStep)
+                .next(processFileStep)
+                .next(moveFileStep)
+                .build();
+    }
+}
+
+
+⸻
+
+2️⃣ Step 1 — Tasklet (List S3 Files)
+
+@Component
+public class S3ListFilesTasklet implements Tasklet {
+
+    private final S3Client s3Client = S3Client.builder().build();
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+                                ChunkContext chunkContext) {
+
+        List<String> files = new ArrayList<>();
+
+        ListObjectsV2Request request = ListObjectsV2Request.builder()
+                .bucket("my-bucket")
+                .prefix("csv/")
+                .build();
+
+        ListObjectsV2Response response = s3Client.listObjectsV2(request);
+
+        for (S3Object object : response.contents()) {
+            if (object.key().endsWith(".csv")) {
+                files.add(object.key());
+            }
+        }
+
+        chunkContext.getStepContext()
+                .getStepExecution()
+                .getJobExecution()
+                .getExecutionContext()
+                .put("files", files);
+
+        return RepeatStatus.FINISHED;
+    }
+}
+
+Step configuration:
+
+@Bean
+public Step listFilesStep(S3ListFilesTasklet tasklet) {
+    return stepBuilderFactory.get("listFilesStep")
+            .tasklet(tasklet)
+            .build();
+}
+
+
+⸻
+
+3️⃣ CSV Model
+
+public class User {
+
+    private String name;
+    private String email;
+    private String city;
+
+    // getters and setters
+}
+
+
+⸻
+
+4️⃣ Reader (CSV Reader)
+
+@Bean
+public FlatFileItemReader<User> reader() {
+
+    FlatFileItemReader<User> reader = new FlatFileItemReader<>();
+
+    reader.setLinesToSkip(1);
+
+    DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
+    tokenizer.setNames("name", "email", "city");
+
+    BeanWrapperFieldSetMapper<User> mapper = new BeanWrapperFieldSetMapper<>();
+    mapper.setTargetType(User.class);
+
+    DefaultLineMapper<User> lineMapper = new DefaultLineMapper<>();
+    lineMapper.setLineTokenizer(tokenizer);
+    lineMapper.setFieldSetMapper(mapper);
+
+    reader.setLineMapper(lineMapper);
+
+    return reader;
+}
+
+
+⸻
+
+5️⃣ Processor (Optional)
+
+@Bean
+public ItemProcessor<User, User> processor() {
+
+    return user -> {
+        user.setName(user.getName().trim());
+        return user;
+    };
+}
+
+
+⸻
+
+6️⃣ Writer (Batch DB Insert)
+
+@Bean
+public JdbcBatchItemWriter<User> writer(DataSource dataSource) {
+
+    JdbcBatchItemWriter<User> writer = new JdbcBatchItemWriter<>();
+
+    writer.setSql(
+        "INSERT INTO users(name,email,city) VALUES (:name,:email,:city)"
+    );
+
+    writer.setItemSqlParameterSourceProvider(
+        new BeanPropertyItemSqlParameterSourceProvider<>());
+
+    writer.setDataSource(dataSource);
+
+    return writer;
+}
+
+
+⸻
+
+7️⃣ Chunk Step
+
+@Bean
+public Step processFileStep(FlatFileItemReader<User> reader,
+                            ItemProcessor<User, User> processor,
+                            JdbcBatchItemWriter<User> writer) {
+
+    return stepBuilderFactory.get("processFileStep")
+            .<User, User>chunk(1000)
+            .reader(reader)
+            .processor(processor)
+            .writer(writer)
+            .build();
+}
+
+chunk(1000) means:
+
+Read 1000 rows
+Insert 1000 rows
+Commit transaction
+Repeat
+
+
+⸻
+
+8️⃣ Move Processed File Tasklet
+
+@Component
+public class MoveFileTasklet implements Tasklet {
+
+    private final S3Client s3Client = S3Client.builder().build();
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+                                ChunkContext chunkContext) {
+
+        String bucket = "my-bucket";
+        String sourceKey = "csv/file.csv";
+        String destinationKey = "processed/file.csv";
+
+        CopyObjectRequest copyRequest = CopyObjectRequest.builder()
+                .copySource(bucket + "/" + sourceKey)
+                .destinationBucket(bucket)
+                .destinationKey(destinationKey)
+                .build();
+
+        s3Client.copyObject(copyRequest);
+
+        DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+                .bucket(bucket)
+                .key(sourceKey)
+                .build();
+
+        s3Client.deleteObject(deleteRequest);
+
+        return RepeatStatus.FINISHED;
+    }
+}
+
+Step:
+
+@Bean
+public Step moveFileStep(MoveFileTasklet tasklet) {
+
+    return stepBuilderFactory.get("moveFileStep")
+            .tasklet(tasklet)
+            .build();
+}
+
+
+⸻
+
+9️⃣ Run Job Hourly
+
+@Scheduled(cron = "0 0 * * * *")
+public void runJob() throws Exception {
+
+    JobParameters params = new JobParametersBuilder()
+            .addLong("time", System.currentTimeMillis())
+            .toJobParameters();
+
+    jobLauncher.run(csvImportJob, params);
+}
+
+
+⸻
+
+Final Architecture
+
+S3 Bucket (multiple CSV)
+        │
+        ▼
+Spring Batch Job
+        │
+        ├── Step 1 (Tasklet)
+        │        List CSV files
+        │
+        ├── Step 2 (Chunk)
+        │        Read CSV rows
+        │        Process
+        │        Batch insert DB
+        │
+        └── Step 3 (Tasklet)
+                 Move file to processed folder
+
+
+⸻
+
+💡 One improvement (very important in real systems):
+
+Instead of processing one file, use:
+
+MultiResourceItemReader
+
+So Spring Batch automatically processes multiple CSV files.
+
+⸻
+
+If you want, I can show you a much better production version (MultiResourceItemReader + Parallel processing) that companies use when there are 1000+ CSV files in S3 per hour. This is very powerful for senior Java roles and system design interviews.

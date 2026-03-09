@@ -1,0 +1,33 @@
+@Component
+public class S3ListFilesTasklet implements Tasklet {
+
+    private final S3Client s3Client = S3Client.builder().build();
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+                                ChunkContext chunkContext) {
+
+        List<String> files = new ArrayList<>();
+
+        ListObjectsV2Request request = ListObjectsV2Request.builder()
+                .bucket("my-bucket")
+                .prefix("csv/")
+                .build();
+
+        ListObjectsV2Response response = s3Client.listObjectsV2(request);
+
+        for (S3Object object : response.contents()) {
+            if (object.key().endsWith(".csv")) {
+                files.add(object.key());
+            }
+        }
+
+        chunkContext.getStepContext()
+                .getStepExecution()
+                .getJobExecution()
+                .getExecutionContext()
+                .put("files", files);
+
+        return RepeatStatus.FINISHED;
+    }
+}

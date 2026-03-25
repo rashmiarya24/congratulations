@@ -576,3 +576,76 @@ public class MultiGzipReader extends MultiResourceItemReader<Object> {
         this.setDelegate(delegate);
     }
 }
+
+
+@Component
+@StepScope
+public class DynamicResourceReader implements ItemStreamReader<Object>,
+        ResourceAwareItemReaderItemStream<Object> {
+
+    private FlatFileItemReader<Object> delegate;
+
+    @Autowired
+    private LineMapperFactory mapperFactory;
+
+    private Resource currentResource;
+
+    @Override
+    public void setResource(Resource resource) {
+        this.currentResource = resource;
+    }
+
+    private void initDelegate() {
+
+        if (delegate != null) return; // already initialized
+
+        try {
+            String fileName = currentResource.getFilename();
+
+            System.out.println("Initializing reader for: " + fileName);
+
+            FileContextHolder.set(fileName);
+
+            InputStream gzip = new GZIPInputStream(currentResource.getInputStream());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(gzip));
+
+            delegate = new FlatFileItemReader<>();
+            delegate.setBufferedReaderFactory((res, enc) -> reader);
+            delegate.setLineMapper(mapperFactory.getMapper(fileName));
+            delegate.setLinesToSkip(1);
+
+            delegate.afterPropertiesSet();
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public Object read() throws Exception {
+        initDelegate();
+        return delegate.read();
+    }
+
+    @Override
+    public void open(ExecutionContext executionContext) {
+
+        initDelegate(); // 🔥 IMPORTANT
+
+        delegate.open(executionContext);
+    }
+
+    @Override
+    public void update(ExecutionContext executionContext) {
+        delegate.update(executionContext);
+    }
+
+    @Override
+    public void close() {
+        if (delegate != null) {
+            delegate.close();
+        }
+        delegate = null;
+        FileContextHolder.clear();
+    }
+}

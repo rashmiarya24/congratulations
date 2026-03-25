@@ -488,3 +488,91 @@ productId,region,productName
 101,US,iPhone Updated
 102,IN,OnePlus Updated
 
+
+
+========
+@Component
+@StepScope
+public class DynamicResourceReader implements ItemStreamReader<Object>,
+        ResourceAwareItemReaderItemStream<Object> {
+
+    private FlatFileItemReader<Object> delegate;
+
+    @Autowired
+    private LineMapperFactory mapperFactory;
+
+    @Override
+    public void setResource(Resource resource) {
+
+        try {
+            String fileName = resource.getFilename();
+
+            FileContextHolder.set(fileName);
+
+            InputStream gzip = new GZIPInputStream(resource.getInputStream());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(gzip));
+
+            delegate = new FlatFileItemReader<>();
+            delegate.setBufferedReaderFactory((res, enc) -> reader);
+            delegate.setLineMapper(mapperFactory.getMapper(fileName));
+            delegate.setLinesToSkip(1);
+
+            delegate.afterPropertiesSet();
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public Object read() throws Exception {
+        return delegate.read();
+    }
+
+    @Override
+    public void open(ExecutionContext executionContext) {
+        delegate.open(executionContext);
+    }
+
+    @Override
+    public void update(ExecutionContext executionContext) {
+        delegate.update(executionContext);
+    }
+
+    @Override
+    public void close() {
+        delegate.close();
+        FileContextHolder.clear();
+    }
+}
+
+
+@Component
+@StepScope
+public class MultiGzipReader extends MultiResourceItemReader<Object> {
+
+    @Value("${input.folder.path}")
+    private String folderPath;
+
+    @Autowired
+    private DynamicResourceReader delegate;
+
+    @PostConstruct
+    public void init() {
+
+        File folder = new File(folderPath);
+
+        File[] files = folder.listFiles((dir, name) -> name.endsWith(".gz"));
+
+        if (files == null || files.length == 0) {
+            throw new RuntimeException("No .gz files found");
+        }
+
+        Resource[] resources = Arrays.stream(files)
+                .map(FileSystemResource::new)
+                .toArray(Resource[]::new);
+
+        this.setResources(resources);
+        this.setDelegate(delegate);
+    }
+}

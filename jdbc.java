@@ -473,3 +473,18 @@ public class JobConfig {
 
 
 
+id,type,name,age
+1,Alice,John,25
+2,Bob,Smith,30
+3,Alice,Rahul,28
+1,Alice,John Updated,26
+2,Bob,Smith Updated,31
+
+
+productId,region,productName
+101,US,iPhone
+102,IN,OnePlus
+103,EU,Samsung
+101,US,iPhone Updated
+102,IN,OnePlus Updated
+

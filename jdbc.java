@@ -157,3 +157,319 @@ public class Application {
         SpringApplication.run(Application.class, args);
     }
 }
+
+
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>batch-upsert-jdbc</artifactId>
+    <version>1.0</version>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+    </parent>
+
+    <dependencies>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-batch</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+
+    </dependencies>
+</project>
+
+spring.datasource.url=jdbc:mysql://localhost:3306/batch_db
+spring.datasource.username=root
+spring.datasource.password=root
+
+spring.batch.jdbc.initialize-schema=always
+
+input.folder.path=/Users/your-folder/gz-files
+
+@SpringBootApplication
+@EnableBatchProcessing
+public class BatchApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(BatchApplication.class, args);
+    }
+}
+
+@Data
+public class File1Model {
+    private Long id;
+    private String type;
+    private String name;
+    private Integer age;
+}
+
+
+@Data
+public class File2Model {
+    private Long productId;
+    private String region;
+    private String productName;
+}
+
+
+CREATE TABLE file1_table (
+    id BIGINT,
+    type VARCHAR(50),
+    name VARCHAR(100),
+    age INT,
+    PRIMARY KEY (id, type)
+);
+
+CREATE TABLE file2_table (
+    product_id BIGINT,
+    region VARCHAR(50),
+    product_name VARCHAR(100),
+    PRIMARY KEY (product_id, region)
+);
+
+public class FileContextHolder {
+
+    private static final ThreadLocal<String> context = new ThreadLocal<>();
+
+    public static void set(String fileName) {
+        context.set(fileName);
+    }
+
+    public static String get() {
+        return context.get();
+    }
+
+    public static void clear() {
+        context.remove();
+    }
+}
+
+@Component
+public class LineMapperFactory {
+
+    public LineMapper<Object> getMapper(String fileName) {
+
+        if (fileName.contains("file1")) return file1Mapper();
+        if (fileName.contains("file2")) return file2Mapper();
+
+        throw new RuntimeException("Unknown file: " + fileName);
+    }
+
+    private LineMapper<Object> file1Mapper() {
+
+        DefaultLineMapper<Object> mapper = new DefaultLineMapper<>();
+
+        DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
+        tokenizer.setNames("id", "type", "name", "age");
+
+        BeanWrapperFieldSetMapper<Object> fsm = new BeanWrapperFieldSetMapper<>();
+        fsm.setTargetType(File1Model.class);
+
+        mapper.setLineTokenizer(tokenizer);
+        mapper.setFieldSetMapper(fsm);
+
+        return mapper;
+    }
+
+    private LineMapper<Object> file2Mapper() {
+
+        DefaultLineMapper<Object> mapper = new DefaultLineMapper<>();
+
+        DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
+        tokenizer.setNames("productId", "region", "productName");
+
+        BeanWrapperFieldSetMapper<Object> fsm = new BeanWrapperFieldSetMapper<>();
+        fsm.setTargetType(File2Model.class);
+
+        mapper.setLineTokenizer(tokenizer);
+        mapper.setFieldSetMapper(fsm);
+
+        return mapper;
+    }
+}
+
+
+@Component
+@StepScope
+public class MultiGzipReader extends MultiResourceItemReader<Object> {
+
+    @Value("${input.folder.path}")
+    private String folderPath;
+
+    @Autowired
+    private DynamicFlatFileReader delegate;
+
+    @PostConstruct
+    public void init() {
+
+        File folder = new File(folderPath);
+
+        Resource[] resources = Arrays.stream(folder.listFiles((d, n) -> n.endsWith(".gz")))
+                .map(FileSystemResource::new)
+                .toArray(Resource[]::new);
+
+        this.setResources(resources);
+        this.setDelegate(delegate);
+    }
+}
+
+
+@Component
+@StepScope
+public class DynamicFlatFileReader extends FlatFileItemReader<Object> {
+
+    @Autowired
+    private LineMapperFactory mapperFactory;
+
+    @Override
+    public void setResource(Resource resource) {
+
+        try {
+            String fileName = resource.getFilename();
+
+            FileContextHolder.set(fileName);
+
+            InputStream gzip = new GZIPInputStream(resource.getInputStream());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(gzip));
+
+            this.setBufferedReaderFactory((res, enc) -> reader);
+            this.setLineMapper(mapperFactory.getMapper(fileName));
+
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+
+
+@Component
+public class CommonProcessor implements ItemProcessor<Object, Object> {
+    @Override
+    public Object process(Object item) {
+        return item;
+    }
+}
+
+@Component
+public class JdbcWriterFactory {
+
+    @Autowired
+    private DataSource dataSource;
+
+    public JdbcBatchItemWriter<Object> getWriter(String fileName) {
+
+        if (fileName.contains("file1")) return file1Writer();
+        if (fileName.contains("file2")) return file2Writer();
+
+        throw new RuntimeException("Unknown file: " + fileName);
+    }
+
+    private JdbcBatchItemWriter<Object> file1Writer() {
+
+        JdbcBatchItemWriter<Object> writer = new JdbcBatchItemWriter<>();
+        writer.setDataSource(dataSource);
+
+        writer.setSql("""
+            INSERT INTO file1_table (id, type, name, age)
+            VALUES (:id, :type, :name, :age)
+            ON DUPLICATE KEY UPDATE
+                name = VALUES(name),
+                age = VALUES(age)
+        """);
+
+        writer.setItemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>());
+        writer.afterPropertiesSet();
+
+        return writer;
+    }
+
+    private JdbcBatchItemWriter<Object> file2Writer() {
+
+        JdbcBatchItemWriter<Object> writer = new JdbcBatchItemWriter<>();
+        writer.setDataSource(dataSource);
+
+        writer.setSql("""
+            INSERT INTO file2_table (product_id, region, product_name)
+            VALUES (:productId, :region, :productName)
+            ON DUPLICATE KEY UPDATE
+                product_name = VALUES(product_name)
+        """);
+
+        writer.setItemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>());
+        writer.afterPropertiesSet();
+
+        return writer;
+    }
+}
+
+@Component
+public class DynamicJdbcWriter implements ItemWriter<Object> {
+
+    @Autowired
+    private JdbcWriterFactory factory;
+
+    private final Map<String, JdbcBatchItemWriter<Object>> cache = new HashMap<>();
+
+    @Override
+    public void write(Chunk<? extends Object> chunk) throws Exception {
+
+        String fileName = FileContextHolder.get();
+
+        JdbcBatchItemWriter<Object> writer =
+                cache.computeIfAbsent(fileName, factory::getWriter);
+
+        writer.write(chunk);
+    }
+}
+
+@Configuration
+public class StepConfig {
+
+    @Bean
+    public Step step(JobRepository jobRepository,
+                     PlatformTransactionManager txManager,
+                     MultiGzipReader reader,
+                     CommonProcessor processor,
+                     DynamicJdbcWriter writer) {
+
+        return new StepBuilder("step", jobRepository)
+                .<Object, Object>chunk(500, txManager)
+                .reader(reader)
+                .processor(processor)
+                .writer(writer)
+                .build();
+    }
+}
+
+@Configuration
+public class JobConfig {
+
+    @Bean
+    public Job job(JobRepository jobRepository, Step step) {
+
+        return new JobBuilder("upsert-job", jobRepository)
+                .start(step)
+                .build();
+    }
+}
+
+
+
